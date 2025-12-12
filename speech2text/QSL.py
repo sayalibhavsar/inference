@@ -101,8 +101,8 @@ class AudioQSLInMemory(AudioQSL):
 
     def load_query_samples(self, sample_list):
         if not self.loaded:
-            pool = Pool(8)
-            print("pool size 8")
+            pool = Pool(4)
+            print("pool size 4")
             result = pool.map(load_sample_from_file, sample_list)
             for sample_id in sample_list:
                 self.sample_id_to_sample[sample_id] = result[sample_id]

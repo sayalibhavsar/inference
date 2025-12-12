@@ -154,6 +154,10 @@ class Instance(mp.Process):
         self.finished = False
 
     def run(self):
+        # CRITICAL: Set GPU FIRST before any CUDA operations
+        gpu_id = self.rank % 2  # Worker 0 → GPU 0, Worker 1 → GPU 1
+        os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
+        print(f"Worker rank {self.rank} ASSIGNED TO GPU {gpu_id}")
         node_list = tuple([math.floor(node) for node in self.node_list])
         memory.set_membind_nodes(*node_list)
         schedule.run_on_cpus(os.getpid(), *self.core_list)
@@ -178,11 +182,11 @@ class Instance(mp.Process):
             skip_tokenizer_init=False,
             trust_remote_code=True,
             tensor_parallel_size=1,
-            max_num_seqs=64,
+            max_num_seqs=128,
             max_model_len=448,
-            max_num_batched_tokens=800,
+            max_num_batched_tokens=64000,
             gpu_memory_utilization=0.95,
-            num_scheduler_steps=1,
+           # num_scheduler_steps=1,
             limit_mm_per_prompt={"audio": 1},
         )
         sampling_params = SamplingParams(
@@ -333,12 +337,26 @@ class vllmSUT:
         response_thread.start()
 
     def issue_queries(self, query_samples):
-        query_sample_list = []
-        for query_sample in query_samples:
+        # Split queries into chunks for multi-worker distribution
+        # Each worker will get roughly equal number of queries
+        chunk_size = max(1, len(query_samples) // self.num_workers)
+
+        query_chunks = []
+        for i in range(0, len(query_samples), chunk_size):
+            chunk = query_samples[i:i + chunk_size]
+            query_chunks.append(list(chunk))
+
+        # Put each chunk in queue - workers will pull chunks independently
+        for chunk in query_chunks:
+            self.query_queue.put(chunk)
+
+
+       # query_sample_list = []
+        #for query_sample in query_samples:
             # Continuous batching
-            self.query_queue.put([query_sample])
-        if len(query_sample_list) > 0:
-            self.query_queue.put(query_sample_list)
+         #   self.query_queue.put([query_sample])
+        #if len(query_sample_list) > 0:
+         #   self.query_queue.put(query_sample_list)
 
     def flush_queries(self):
         pass
